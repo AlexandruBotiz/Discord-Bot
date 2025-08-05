@@ -1,0 +1,8 @@
+# Ignore Windows junk
+Desktop.ini
+Thumbs.db
+
+# Ignore Python/Node/other temp files
+__pycache__/
+node_modules/
+.env
