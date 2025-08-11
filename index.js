@@ -16,11 +16,11 @@ const client = new Client({
 
 client.login(process.env.DISCORD_TOKEN);
 
-client.on("messageCreate", async (message) => {
-    console.log(message);
+client.on("interactionCreate", async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
 
-    if (!message.author.bot) {
-        message.author.send('Salut Rege');
-        //message.channel.send('Salut sefule');
+    if (interaction.commandName === "brainbuzz") {
+        await interaction.reply("Work in progress - Brainbuzz");
     }
 });
+
