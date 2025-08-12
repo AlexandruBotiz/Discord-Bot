@@ -12,8 +12,12 @@ import {
   ButtonBuilder,
   ButtonStyle
 } from 'discord.js';
+import { getQuiz, sendUserAnswer } from './utils/backendServices.js';
+import { handleQuizTimeout } from './utils/handleQuizTimeout.js';
 
 dotenv.config();
+
+const quizSessionMap = new Map(); // to store quiz sessions in memory
 
 const quizzes = {
   historical: {
@@ -33,7 +37,7 @@ const quizzes = {
   }
 };
 
-const client = new Client({
+export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
@@ -44,7 +48,9 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-client.login(process.env.DISCORD_TOKEN);
+(async () => {
+  client.login(process.env.DISCORD_TOKEN)
+})();
 
 client.on("interactionCreate", async (interaction) => {
   // Slash command
@@ -55,8 +61,8 @@ client.on("interactionCreate", async (interaction) => {
         .setPlaceholder('Selectează tipul quiz-ului')
         .addOptions(
           { label: 'Historical', value: 'historical' },
-          { label: 'Funny Stuff / Icebreakers', value: 'funny' },
-          { label: 'Movie Quote Identification', value: 'movie' }
+          { label: 'Funny Stuff / Icebreakers', value: 'icebreaker' },
+          { label: 'Movie Quote Identification', value: 'movie_quote' }
         );
 
       const row = new ActionRowBuilder().addComponents(quizTypeSelect);
@@ -109,34 +115,119 @@ client.on("interactionCreate", async (interaction) => {
   // Modal submission handler
   if (interaction.type === InteractionType.ModalSubmit) {
     if (interaction.customId.startsWith('quiz_setup_')) {
+      // acknowledge the modal submission
+      await interaction.deferReply();
       const quizType = interaction.customId.replace('quiz_setup_', '');
       const delivery = interaction.fields.getTextInputValue('delivery').toLowerCase();
       const channelName = interaction.fields.getTextInputValue('channel');
-      const duration = interaction.fields.getTextInputValue('duration');
+      const duration = Number(interaction.fields.getTextInputValue('duration'));
+      const durationSec = duration * 60; // convert minutes to seconds
+
+      /**
+       * The type of destination for the quiz.
+       * Either a user (private message) or a channel.
+       */
+      let destinationType;
+      /**
+       * The ID of either the channel or the user. This ID is used to fetch a `Channel` or a `User` object
+       * that can be used to send messages in/to using the `send()` method.
+       */
+      let destinationId;
+      switch (delivery) {
+        case 'canal':
+          if (!channelName) {
+            return interaction.reply({ content: "❌ Te rog să specifici un nume de canal.", ephemeral: true });
+          }
+
+          // get selected channel id
+          // GUILD = SERVER (Discord server)
+          const guild = client.guilds.cache.get(interaction.guildId);
+          const channel = guild.channels.cache.find(channel => channel.name.toLowerCase() === channelName.toLowerCase());
+
+          // if no channel with the given name found
+          if (!channel) {
+            return interaction.reply({ content: `❌ Nu am găsit canalul #${channelName}.`, flags: 'Ephemeral' });
+          }
+
+          const channelId = channel.id;
+
+          destinationType = 'channel';
+          destinationId = channelId;
+
+          break;
+
+        case 'privat':
+          destinationType = 'private';
+          destinationId = interaction.user.id;
+
+          break;
+      }
+      if (delivery === 'canal' && !channelName) {
+        return interaction.reply({ content: "❌ Te rog să specifici un nume de canal.", ephemeral: true });
+      }
+
+      // generate quiz and store locally
+      const quiz = await getQuiz(quizType, durationSec);
+
+      if (!quiz) {
+        return interaction.reply({ content: "❌ Can't think of a quiz right now. Try later.", ephemeral: true });
+      }
+
+      // print correct answer
+      console.log('Quiz correct answer:', quiz.answer);
+
+      // compute endTime
+      const now = Date.now();
+      const endTime = now + durationSec * 1000; // convert seconds to milliseconds
+
+      // store quiz in db
+      const creatorName = interaction.user.globalName || interaction.user.username;
+      const quizSessionData = {
+        quiz,
+        endTime,
+        usersAnswered: [],
+        creatorName,
+        type: quizType,
+        question: quiz.quizText,
+        destinationType,
+        destinationId
+      }
+      quizSessionMap.set(quiz.quiz_id, quizSessionData);
+
+      // start timeout
+      // NOTE: do not use `await` since it will block the event loop
+      handleQuizTimeout(quiz.quiz_id, endTime, quizSessionMap);
 
       const startButton = new ButtonBuilder()
-        .setCustomId(`start_quiz_${quizType}`)
+        .setCustomId(`start_quiz_${quiz.quiz_id}`)
         .setLabel('Start Quiz')
         .setStyle(ButtonStyle.Success);
 
       const row = new ActionRowBuilder().addComponents(startButton);
 
+      const sentReply = await interaction.fetchReply();
+      await sentReply.delete();
+
       if (delivery === 'privat') {
         await interaction.user.send({
-          content: `Tip quiz: ${quizType}\nDurată: ${duration} minute`,
-          components: [row]
+          content: `You have started a new quiz!\nClick the "Start Quiz" button below to give it a try.`,
+          components: [row],
+          embeds: [
+            {
+              image: { url: quiz.imageUrl }
+            }
+          ]
         });
-        await interaction.reply({ content: 'Ți-am trimis quiz-ul în privat! 📩', ephemeral: true });
       } else if (delivery === 'canal') {
+        // get the channel name from the input
         const channel = client.channels.cache.find(c => c.name === channelName);
         if (channel) {
           await channel.send({
-            content: `Tip quiz: ${quizType}\nDurată: ${duration} minute`,
+            content: `${creatorName} started a new ${quizType.toLowerCase()} quiz!\nClick the "Start Quiz" button below to give it a try.`,
             components: [row]
           });
-          await interaction.reply({ content: `Am trimis quiz-ul în canalul #${channelName}! 📢`, ephemeral: true });
         } else {
-          await interaction.reply({ content: `Nu am găsit canalul #${channelName}`, ephemeral: true });
+          await interaction.reply({ content: `Could not find #${channelName}`, ephemeral: true });
         }
       } else {
         await interaction.reply({ content: 'Mod de livrare invalid. Scrie "privat" sau "canal".', ephemeral: true });
@@ -147,8 +238,8 @@ client.on("interactionCreate", async (interaction) => {
   // --- Buton "Start Quiz" ---
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('start_quiz_')) {
-      const quizType = interaction.customId.replace('start_quiz_', '');
-      const quiz = quizzes[quizType];
+      const quizId = interaction.customId.replace('start_quiz_', '');
+      const { quiz } = quizSessionMap.get(quizId);
 
       if (!quiz) {
         return interaction.reply({ content: "Nu am găsit quiz-ul!", ephemeral: true });
@@ -156,7 +247,7 @@ client.on("interactionCreate", async (interaction) => {
 
       // Buton "Răspunde"
       const answerButton = new ButtonBuilder()
-        .setCustomId(`answer_quiz_button_${quizType}`)
+        .setCustomId(`answer_quiz_button_${quizId}`)
         .setLabel('Răspunde')
         .setStyle(ButtonStyle.Primary);
 
@@ -175,11 +266,11 @@ client.on("interactionCreate", async (interaction) => {
 // --- Buton "Răspunde" ---
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('answer_quiz_button_')) {
-      const quizType = interaction.customId.replace('answer_quiz_button_', '');
-      const quiz = quizzes[quizType];
+      const quizId = interaction.customId.replace('answer_quiz_button_', '');
+      const { quiz } = quizSessionMap.get(quizId);
 
       const modal = new ModalBuilder()
-        .setCustomId(`answer_quiz_${quizType}`)
+        .setCustomId(`answer_quiz_${quizId}`)
         .setTitle('Răspunde la quiz');
 
       const optionsInput = new TextInputBuilder()
@@ -197,15 +288,54 @@ client.on("interactionCreate", async (interaction) => {
 // --- Procesare răspuns din modal ---
   if (interaction.type === InteractionType.ModalSubmit) {
     if (interaction.customId.startsWith('answer_quiz_')) {
-      const quizType = interaction.customId.replace('answer_quiz_', '');
-      const quiz = quizzes[quizType];
-      const answer = interaction.fields.getTextInputValue('answer');
+      const quizId = interaction.customId.replace('answer_quiz_', '');
+      const { quiz, creatorName, type, question } = quizSessionMap.get(quizId);
+      const answer = interaction.fields.getTextInputValue('answer').trim();
 
-      if (answer.trim().toLowerCase() === quiz.correctAnswer.toLowerCase()) {
-        await interaction.reply({ content: '✅ Corect!', ephemeral: true });
+      const correct = answer.toLowerCase() === quiz.answer.toLowerCase()
+
+      let text;
+      if (correct) {
+        text = [
+          '🎉 Well done! That’s the correct answer.',
+          `This quiz was created by: *${creatorName}*`,
+          `Quiz type: *${type}*`,
+          `Question: _${question}_`
+        ].join('\n');
       } else {
-        await interaction.reply({ content: `❌ Greșit! Răspunsul corect era: ${quiz.correctAnswer}`, ephemeral: true });
+        text = [
+          '❌ Oops, that was incorrect.',
+          `The correct answer was: *${quiz.answer}*`,
+          `You selected: *${answer}*`,
+          `This quiz was created by: *${creatorName}*`,
+          `Quiz type: *${type}*quiz.`,
+          `Question: _${question}_`
+        ].join('\n');
       }
+
+      await interaction.reply({ content: text, flags: 'Ephemeral' })
+
+      // send answer to backend
+      const userId = interaction.user.id;
+      const userData = {
+        display_name: interaction.user.username,
+        profile_picture_url: interaction.user.displayAvatarURL()
+      };
+
+      try {
+        await sendUserAnswer(userId, quizId, correct, userData)
+
+        console.log('✅ Answer sent to backend successfully.');
+
+      } catch (error) {
+        console.error('❌ Failed to send answer to backend:', error.message)
+      }
+
+      // update session with user answer
+      quizSessionMap.get(quizId).usersAnswered.push(userId);
+
+      console.log('Updated session with user answer: ', quizSessionMap.get(quizId).usersAnswered);
+
     }
   }
 });
