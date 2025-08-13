@@ -53,6 +53,9 @@ export const client = new Client({
   client.login(process.env.DISCORD_TOKEN)
 })();
 
+let quizCreationMsg;
+let quizCreationMessageObject;
+
 client.on("interactionCreate", async (interaction) => {
   // Slash command
   if (interaction.isChatInputCommand()) {
@@ -68,11 +71,12 @@ client.on("interactionCreate", async (interaction) => {
 
       const row = new ActionRowBuilder().addComponents(quizTypeSelect);
 
-      await interaction.reply({
-        content: 'Alege tipul quiz-ului:',
+      quizCreationMessageObject = {
+        content: 'Choose the type of quiz you want to create:',
         components: [row],
-        ephemeral: true
-      });
+        flags: 'Ephemeral'
+      }
+      quizCreationMsg = await interaction.reply(quizCreationMessageObject);
     }
   }
 
@@ -116,8 +120,10 @@ client.on("interactionCreate", async (interaction) => {
   // Modal submission handler
   if (interaction.type === InteractionType.ModalSubmit) {
     if (interaction.customId.startsWith('quiz_setup_')) {
-      // acknowledge the modal submission
-      await interaction.deferReply();
+      // edit the quiz creation message to
+      //  avoid the user opening the modal again
+      await quizCreationMsg.edit({ content: "Loading...", components: [] } );
+
       const quizType = interaction.customId.replace('quiz_setup_', '');
       const delivery = interaction.fields.getTextInputValue('delivery').toLowerCase();
       const channelName = interaction.fields.getTextInputValue('channel');
@@ -125,6 +131,11 @@ client.on("interactionCreate", async (interaction) => {
 
       // Convertim durata în secunde
       let durationSeconds = 0;
+      if (!durationInput) {
+        await interaction.reply({ content: '❌ Specify the duration of the quiz.', flags: 'Ephemeral' });
+        await quizCreationMsg.edit(quizCreationMessageObject);
+        return;
+      }
       if (durationInput.includes(':')) {
         const [min, sec] = durationInput.split(':').map(Number);
         durationSeconds = (min * 60) + sec;
@@ -132,7 +143,9 @@ client.on("interactionCreate", async (interaction) => {
         durationSeconds = Number(durationInput);
       }
       if (isNaN(durationSeconds) || durationSeconds <= 0) {
-        return interaction.reply({ content: 'Timp invalid!', flags: 'Ephemeral' });
+        await interaction.reply({ content: '❌ Invalid time! Try again and respect the mm:ss format.', flags: 'Ephemeral' });
+        await quizCreationMsg.edit(quizCreationMessageObject);
+        return;
       }
 
       /**
@@ -148,7 +161,9 @@ client.on("interactionCreate", async (interaction) => {
       switch (delivery) {
         case 'canal':
           if (!channelName) {
-            return interaction.reply({ content: "❌ Te rog să specifici un nume de canal.", ephemeral: true });
+            await interaction.reply({ content: "❌ Specify a channel to send the quiz in.", flags: 'Ephemeral' });
+            await quizCreationMsg.edit(quizCreationMessageObject);
+            return;
           }
 
           // get selected channel id
@@ -158,7 +173,9 @@ client.on("interactionCreate", async (interaction) => {
 
           // if no channel with the given name found
           if (!channel) {
-            return interaction.reply({ content: `❌ Nu am găsit canalul #${channelName}.`, flags: 'Ephemeral' });
+            await interaction.reply({ content: `❌ Couldn't  find channel #${channelName}.`, flags: 'Ephemeral' });
+            await quizCreationMsg.edit(quizCreationMessageObject);
+            return;
           }
 
           const channelId = channel.id;
@@ -173,16 +190,25 @@ client.on("interactionCreate", async (interaction) => {
           destinationId = interaction.user.id;
 
           break;
+
+        default:
+          await interaction.reply({ content: '❌ Invalid delivery method. Type "privat" or "canal".', flags: 'Ephemeral' });
+          await quizCreationMsg.edit(quizCreationMessageObject);
+          return;
       }
-      if (delivery === 'canal' && !channelName) {
-        return interaction.reply({ content: "❌ Te rog să specifici un nume de canal.", ephemeral: true });
-      }
+
+      // display "BrainBuzz is thinking..." message
+      //  while quiz is being generated
+      await interaction.deferReply();
 
       // generate quiz and store locally
       const quiz = await getQuiz(quizType, durationSeconds);
 
       if (!quiz) {
-        return interaction.reply({ content: "❌ Can't think of a quiz right now. Try later.", ephemeral: true });
+        await quizCreationMsg.edit({ content: "❌ Can't think of a quiz right now. Try later.", flags: 'Ephemeral' })
+        const sentReply = await interaction.fetchReply();
+        await sentReply.delete();
+        return;
       }
 
       // print correct answer
@@ -217,6 +243,9 @@ client.on("interactionCreate", async (interaction) => {
 
       const row = new ActionRowBuilder().addComponents(startButton);
 
+      // delete the original quiz creation message
+      await quizCreationMsg.delete();
+      // delete the sent reply
       const sentReply = await interaction.fetchReply();
       await sentReply.delete();
 

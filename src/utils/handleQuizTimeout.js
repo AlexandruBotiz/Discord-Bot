@@ -112,7 +112,7 @@ export async function handleQuizTimeout(quizId, quizEndTime, quizSessionMap) {
 
     console.log(`Deleting quiz session with ID ${quizId} from the map.`);
     quizSessionMap.delete(quizId);
-  }, 30000);
+  }, remainingMs);
 }
 
 async function sendRewardsToTopUsers(quizId, topUsersWithImages, otherUsers){
