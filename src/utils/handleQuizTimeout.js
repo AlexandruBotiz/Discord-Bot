@@ -21,12 +21,6 @@ async function getDestination(destinationType, destinationId) {
 export async function handleQuizTimeout(quizId, quizEndTime, quizSessionMap) {
   const remainingMs = quizEndTime - Date.now();
 
-  if (remainingMs <= 0) {
-    // TODO: is this check necessary?
-    console.log(`Quiz with ID ${quizId} has already expired.`);
-    return;
-  }
-
   console.log(`Setting timeout for quiz with ID ${quizId} for ${remainingMs} ms.`);
 
   let topUsersWithImages = [];

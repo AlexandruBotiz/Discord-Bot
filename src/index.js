@@ -42,7 +42,7 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === "brainbuzz") {
 
-    // 🔍 Verifică dacă există un quiz activ
+    // Checking if a quiz is active
     const now = Date.now();
     const quizActive = Array.from(quizSessionMap.values())
       .some(session => session.endTime && session.endTime > now);
@@ -52,7 +52,7 @@ client.on("interactionCreate", async (interaction) => {
         content: "⚠️ Un quiz este deja activ! Așteaptă să se termine înainte să creezi altul.",
         ephemeral: true
       });
-      return; // oprește execuția comenzii
+      return;
     }
 
       const quizTypeSelect = new StringSelectMenuBuilder()
@@ -124,7 +124,6 @@ client.on("interactionCreate", async (interaction) => {
       const channelName = interaction.fields.getTextInputValue('channel');
       let durationInput = interaction.fields.getTextInputValue('duration');
 
-      // Convertim durata în secunde
       let durationSeconds = 0;
       if (!durationInput) {
         await interaction.reply({ content: '❌ Specify the duration of the quiz.', flags: 'Ephemeral' });
@@ -270,7 +269,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-    // --- Buton "Start Quiz" ---
+    // --- "Start Quiz" Button ---
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('start_quiz_')) {
       const parts = interaction.customId.replace('start_quiz_', '').split('_');
@@ -285,7 +284,6 @@ client.on("interactionCreate", async (interaction) => {
 
       const { quiz } = session;
 
-      // Buton "Răspunde"
       const answerButton = new ButtonBuilder()
         .setCustomId(`answer_quiz_button_${quizId}`)
         .setLabel('Răspunde')
@@ -295,11 +293,9 @@ client.on("interactionCreate", async (interaction) => {
 
       let remaining = Math.max(0, Math.floor((session.endTime - Date.now()) / 1000));
 
-      // salvăm momentul de final în map
       const endTime = session.endTime;
       handleQuizTimeout(quizId, endTime, quizSessionMap);
 
-      // Mesaj cu întrebarea + opțiunile
       const quizMessage = await interaction.reply({
         content: `**${quiz.quizText}**\n\n` +
           quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n") +
@@ -307,14 +303,12 @@ client.on("interactionCreate", async (interaction) => {
         components: [row],
       });
 
-      // update vizual al countdown-ului
       const timerId = setInterval(async () => {
           remaining = Math.max(0, Math.floor((session.endTime - Date.now()) / 1000));
 
         if (remaining <= 0) {
           clearInterval(timerId);
 
-          // dezactivează butonul doar vizual
           const disabledButton = ButtonBuilder.from(answerButton).setDisabled(true);
           const disabledRow = new ActionRowBuilder().addComponents(disabledButton);
 
@@ -327,7 +321,7 @@ client.on("interactionCreate", async (interaction) => {
           return;
         }
 
-        // update mesaj cu timpul rămas
+        // Time remaining message updater
         await quizMessage.edit({
           content: `**${quiz.quizText}**\n\n` +
             quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n") +
@@ -339,7 +333,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 
 
-// --- Buton "Răspunde" ---
+// --- Answer Button Interaction ---
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('answer_quiz_button_')) {
       const quizId = interaction.customId.replace('answer_quiz_button_', '');
@@ -361,7 +355,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-// --- Procesare răspuns din modal ---
+// --- Answer Processing  ---
 if (interaction.isModalSubmit() && interaction.customId.startsWith('answer_quiz_')) {
   if (interaction.customId.startsWith('answer_quiz_')) {
     const quizId = interaction.customId.replace('answer_quiz_', '');
