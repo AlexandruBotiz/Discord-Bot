@@ -46,8 +46,6 @@ const client = new Client({
 
 client.login(process.env.DISCORD_TOKEN);
 
-const activeQuizzes = new Map();
-
 client.on("interactionCreate", async (interaction) => {
     // Slash command
     if (interaction.isChatInputCommand()) {
