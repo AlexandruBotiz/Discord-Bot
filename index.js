@@ -46,6 +46,8 @@ const client = new Client({
 
 client.login(process.env.DISCORD_TOKEN);
 
+const activeQuizzes = new Map();
+
 client.on("interactionCreate", async (interaction) => {
     // Slash command
     if (interaction.isChatInputCommand()) {
@@ -92,7 +94,7 @@ client.on("interactionCreate", async (interaction) => {
 
             const durationInput = new TextInputBuilder()
                 .setCustomId('duration')
-                .setLabel('Durata quiz-ului (minute)')
+                .setLabel('Durata quiz-ului (mm:ss sau secunde)')
                 .setStyle(TextInputStyle.Short)
                 .setRequired(true);
 
@@ -112,10 +114,22 @@ client.on("interactionCreate", async (interaction) => {
             const quizType = interaction.customId.replace('quiz_setup_', '');
             const delivery = interaction.fields.getTextInputValue('delivery').toLowerCase();
             const channelName = interaction.fields.getTextInputValue('channel');
-            const duration = interaction.fields.getTextInputValue('duration');
+            let durationInput = interaction.fields.getTextInputValue('duration');
+
+            // Convertim durata în secunde
+            let durationSeconds = 0;
+            if (durationInput.includes(':')) {
+                const [min, sec] = durationInput.split(':').map(Number);
+                durationSeconds = (min * 60) + sec;
+            } else {
+                durationSeconds = Number(durationInput);
+            }
+            if (isNaN(durationSeconds) || durationSeconds <= 0) {
+                return interaction.reply({ content: 'Timp invalid!', ephemeral: true });
+            }
 
             const startButton = new ButtonBuilder()
-                .setCustomId(`start_quiz_${quizType}`)
+                .setCustomId(`start_quiz_${quizType}_${durationSeconds}`)
                 .setLabel('Start Quiz')
                 .setStyle(ButtonStyle.Success);
 
@@ -123,7 +137,7 @@ client.on("interactionCreate", async (interaction) => {
 
             if (delivery === 'privat') {
                 await interaction.user.send({
-                    content: `Tip quiz: ${quizType}\nDurată: ${duration} minute`,
+                    content: `Tip quiz: ${quizType}\nDurată: ${durationSeconds} secunde`,
                     components: [row]
                 });
                 await interaction.reply({ content: 'Ți-am trimis quiz-ul în privat! 📩', ephemeral: true });
@@ -131,7 +145,7 @@ client.on("interactionCreate", async (interaction) => {
                 const channel = client.channels.cache.find(c => c.name === channelName);
                 if (channel) {
                     await channel.send({
-                        content: `Tip quiz: ${quizType}\nDurată: ${duration} minute`,
+                        content: `Tip quiz: ${quizType}`,
                         components: [row]
                     });
                     await interaction.reply({ content: `Am trimis quiz-ul în canalul #${channelName}! 📢`, ephemeral: true });
@@ -144,68 +158,109 @@ client.on("interactionCreate", async (interaction) => {
         }
     }
 
-  // --- Buton "Start Quiz" ---
-if (interaction.isButton()) {
-    if (interaction.customId.startsWith('start_quiz_')) {
-        const quizType = interaction.customId.replace('start_quiz_', '');
-        const quiz = quizzes[quizType];
+    // --- Buton "Start Quiz" ---
+    if (interaction.isButton()) {
+        if (interaction.customId.startsWith('start_quiz_')) {
+            const parts = interaction.customId.replace('start_quiz_', '').split('_');
+            const quizType = parts[0];
+            const durationSeconds = parseInt(parts[1]);
+            const quiz = quizzes[quizType];
 
-        if (!quiz) {
-            return interaction.reply({ content: "Nu am găsit quiz-ul!", ephemeral: true });
-        }
+            if (!quiz) {
+                return interaction.reply({ content: "Nu am găsit quiz-ul!", ephemeral: true });
+            }
 
-        // Buton "Răspunde"
-        const answerButton = new ButtonBuilder()
-            .setCustomId(`answer_quiz_button_${quizType}`)
-            .setLabel('Răspunde')
-            .setStyle(ButtonStyle.Primary);
+            // Buton "Răspunde"
+            const answerButton = new ButtonBuilder()
+                .setCustomId(`answer_quiz_button_${quizType}`)
+                .setLabel('Răspunde')
+                .setStyle(ButtonStyle.Primary);
 
-        const row = new ActionRowBuilder().addComponents(answerButton);
+            const row = new ActionRowBuilder().addComponents(answerButton);
 
-        // Mesaj cu întrebarea + opțiunile
-        await interaction.reply({
-            content: `**${quiz.quizText}**\n\n` +
-                     quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n"),
-            components: [row],
-            ephemeral: true
-        });
-    }
-}
+            let remaining = durationSeconds;
 
-// --- Buton "Răspunde" ---
-if (interaction.isButton()) {
-    if (interaction.customId.startsWith('answer_quiz_button_')) {
-        const quizType = interaction.customId.replace('answer_quiz_button_', '');
-        const quiz = quizzes[quizType];
+            // salvăm momentul de final în map
+            activeQuizzes.set(quizType, Date.now() + durationSeconds * 1000);
 
-        const modal = new ModalBuilder()
-            .setCustomId(`answer_quiz_${quizType}`)
-            .setTitle('Răspunde la quiz');
+            const quizMessage = await interaction.channel.send({
+                content: `**${quiz.quizText}**\n\n` +
+                        quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n") +
+                        `\n\n⏳ Timp rămas: ${remaining}s`,
+                components: [row]
+            });
 
-        const optionsInput = new TextInputBuilder()
-            .setCustomId('answer')
-            .setLabel('Răspunsul tău (exact cum apare)')
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
+            await interaction.reply({ content: 'Quiz-ul a început! 📢', ephemeral: true });
 
-        modal.addComponents(new ActionRowBuilder().addComponents(optionsInput));
-
-        await interaction.showModal(modal);
-    }
-}
-
-// --- Procesare răspuns din modal ---
-if (interaction.type === InteractionType.ModalSubmit) {
-    if (interaction.customId.startsWith('answer_quiz_')) {
-        const quizType = interaction.customId.replace('answer_quiz_', '');
-        const quiz = quizzes[quizType];
-        const answer = interaction.fields.getTextInputValue('answer');
-
-        if (answer.trim().toLowerCase() === quiz.correctAnswer.toLowerCase()) {
-            await interaction.reply({ content: '✅ Corect!', ephemeral: true });
-        } else {
-            await interaction.reply({ content: `❌ Greșit! Răspunsul corect era: ${quiz.correctAnswer}`, ephemeral: true });
+            const timerId = setInterval(async () => {
+                remaining--;
+                if (remaining <= 0) {
+                    clearInterval(timerId);
+                    const disabledButton = ButtonBuilder.from(answerButton).setDisabled(true);
+                    const disabledRow = new ActionRowBuilder().addComponents(disabledButton);
+                    await quizMessage.edit({
+                        content: `**${quiz.quizText}**\n\n` +
+                                quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n") +
+                                `\n\n⏳ Timpul a expirat!`,
+                        components: [disabledRow]
+                    });
+                    return;
+                }
+                await quizMessage.edit({
+                    content: `**${quiz.quizText}**\n\n` +
+                            quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n") +
+                            `\n\n⏳ Timp rămas: ${remaining}s`,
+                    components: [row]
+                });
+            }, 1000);
         }
     }
-}
+
+
+
+    // --- Buton "Răspunde" ---
+    if (interaction.isButton()) {
+        if (interaction.customId.startsWith('answer_quiz_button_')) {
+            const quizType = interaction.customId.replace('answer_quiz_button_', '');
+            const quiz = quizzes[quizType];
+
+            const modal = new ModalBuilder()
+                .setCustomId(`answer_quiz_${quizType}`)
+                .setTitle('Răspunde la quiz');
+
+            const optionsInput = new TextInputBuilder()
+                .setCustomId('answer')
+                .setLabel('Răspunsul tău (exact cum apare)')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true);
+
+            modal.addComponents(new ActionRowBuilder().addComponents(optionsInput));
+
+            await interaction.showModal(modal);
+        }
+    }
+
+    // --- Procesare răspuns din modal ---
+    if (interaction.type === InteractionType.ModalSubmit) {
+        if (interaction.customId.startsWith('answer_quiz_')) {
+            const quizType = interaction.customId.replace('answer_quiz_', '');
+            const quiz = quizzes[quizType];
+            const answer = interaction.fields.getTextInputValue('answer');
+
+            const endTime = activeQuizzes.get(quizType);
+            if (!endTime || Date.now() > endTime) {
+                return interaction.reply({
+                    content: '⏳ Timpul a expirat, nu mai poți răspunde.',
+                    ephemeral: true
+                });
+            }
+
+            if (answer.trim().toLowerCase() === quiz.correctAnswer.toLowerCase()) {
+                await interaction.reply({ content: '✅ Corect!', ephemeral: true });
+            } else {
+                await interaction.reply({ content: `❌ Greșit! Răspunsul corect era: ${quiz.correctAnswer}`, ephemeral: true });
+            }
+        }
+    }
+
 });
