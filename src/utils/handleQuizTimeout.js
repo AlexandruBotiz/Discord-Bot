@@ -19,8 +19,7 @@ async function getDestination(destinationType, destinationId) {
 }
 
 export async function handleQuizTimeout(quizId, quizEndTime, quizSessionMap) {
-  const now = new Date();
-  const remainingMs = quizEndTime - now;
+  const remainingMs = quizEndTime - Date.now();
 
   if (remainingMs <= 0) {
     // TODO: is this check necessary?
