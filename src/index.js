@@ -18,6 +18,7 @@ import { handleQuizTimeout } from './utils/handleQuizTimeout.js';
 dotenv.config();
 
 const quizSessionMap = new Map(); // to store quiz sessions in memory
+const activeQuizzes = new Map();
 
 const quizzes = {
   historical: {
@@ -98,7 +99,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const durationInput = new TextInputBuilder()
         .setCustomId('duration')
-        .setLabel('Durata quiz-ului (minute)')
+        .setLabel('Durata quiz-ului (mm:ss sau secunde)')
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
 
@@ -120,8 +121,19 @@ client.on("interactionCreate", async (interaction) => {
       const quizType = interaction.customId.replace('quiz_setup_', '');
       const delivery = interaction.fields.getTextInputValue('delivery').toLowerCase();
       const channelName = interaction.fields.getTextInputValue('channel');
-      const duration = Number(interaction.fields.getTextInputValue('duration'));
-      const durationSec = duration * 60; // convert minutes to seconds
+      let durationInput = interaction.fields.getTextInputValue('duration');
+
+      // Convertim durata în secunde
+      let durationSeconds = 0;
+      if (durationInput.includes(':')) {
+        const [min, sec] = durationInput.split(':').map(Number);
+        durationSeconds = (min * 60) + sec;
+      } else {
+        durationSeconds = Number(durationInput);
+      }
+      if (isNaN(durationSeconds) || durationSeconds <= 0) {
+        return interaction.reply({ content: 'Timp invalid!', flags: 'Ephemeral' });
+      }
 
       /**
        * The type of destination for the quiz.
@@ -167,7 +179,7 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       // generate quiz and store locally
-      const quiz = await getQuiz(quizType, durationSec);
+      const quiz = await getQuiz(quizType, durationSeconds);
 
       if (!quiz) {
         return interaction.reply({ content: "❌ Can't think of a quiz right now. Try later.", ephemeral: true });
@@ -178,7 +190,7 @@ client.on("interactionCreate", async (interaction) => {
 
       // compute endTime
       const now = Date.now();
-      const endTime = now + durationSec * 1000; // convert seconds to milliseconds
+      const endTime = now + durationSeconds * 1000; // convert seconds to milliseconds
 
       // store quiz in db
       const creatorName = interaction.user.globalName || interaction.user.username;
@@ -199,7 +211,7 @@ client.on("interactionCreate", async (interaction) => {
       handleQuizTimeout(quiz.quiz_id, endTime, quizSessionMap);
 
       const startButton = new ButtonBuilder()
-        .setCustomId(`start_quiz_${quiz.quiz_id}`)
+        .setCustomId(`start_quiz_${quiz.quiz_id}_${quizType}_${durationSeconds}`)
         .setLabel('Start Quiz')
         .setStyle(ButtonStyle.Success);
 
@@ -210,7 +222,7 @@ client.on("interactionCreate", async (interaction) => {
 
       if (delivery === 'privat') {
         await interaction.user.send({
-          content: `You have started a new quiz!\nClick the "Start Quiz" button below to give it a try.`,
+          content: `You have started a new quiz!\nClick the "Start Quiz" button below to give it a try. You have ${durationSeconds} seconds.`,
           components: [row],
           embeds: [
             {
@@ -223,7 +235,7 @@ client.on("interactionCreate", async (interaction) => {
         const channel = client.channels.cache.find(c => c.name === channelName);
         if (channel) {
           await channel.send({
-            content: `${creatorName} started a new ${quizType.toLowerCase()} quiz!\nClick the "Start Quiz" button below to give it a try.`,
+            content: `${creatorName} started a new ${quizType.toLowerCase()} quiz!\nClick the "Start Quiz" button below to give it a try. You have ${durationSeconds} seconds.`,
             components: [row]
           });
         } else {
@@ -238,7 +250,10 @@ client.on("interactionCreate", async (interaction) => {
   // --- Buton "Start Quiz" ---
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('start_quiz_')) {
-      const quizId = interaction.customId.replace('start_quiz_', '');
+      const parts = interaction.customId.replace('start_quiz_', '').split('_');
+      const quizId = parts[0]
+      const quizType = parts[1];
+      const durationSeconds = parseInt(parts[2]);
       const { quiz } = quizSessionMap.get(quizId);
 
       if (!quiz) {
@@ -253,13 +268,51 @@ client.on("interactionCreate", async (interaction) => {
 
       const row = new ActionRowBuilder().addComponents(answerButton);
 
+      let remaining = durationSeconds
+
+      // salvăm momentul de final în map
+      activeQuizzes.set(quizId, Date.now() + durationSeconds * 1000);
+
       // Mesaj cu întrebarea + opțiunile
-      await interaction.reply({
+      const quizMessage = await interaction.reply({
         content: `**${quiz.quizText}**\n\n` +
-          quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n"),
+          quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n") +
+          `\n\n⏳ Timp rămas: ${remaining}s`,
         components: [row],
-        ephemeral: true
+        flags: 'Ephemeral'
       });
+
+      // update countdown number each second
+      const timerId = setInterval(async () => {
+        remaining--;
+
+        // if countdown is over
+        if (remaining <= 0) {
+          clearInterval(timerId);
+
+          // disable button
+          const disabledButton = ButtonBuilder.from(answerButton).setDisabled(true);
+          const disabledRow = new ActionRowBuilder().addComponents(disabledButton);
+
+          // update quizMessage with updated content and disabled button
+          await quizMessage.edit({
+            content: `**${quiz.quizText}**\n\n` +
+              quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n") +
+              `\n\n⏳ Time out!`,
+            components: [disabledRow]
+          });
+          return;
+        }
+
+        // if countdown is not over
+        // update quizMessage with updated content (countdown text)
+        await quizMessage.edit({
+          content: `**${quiz.quizText}**\n\n` +
+            quiz.options.map((opt, i) => `**${i + 1}.** ${opt}`).join("\n") +
+            `\n\n⏳ Time remaining: ${remaining}s`,
+          components: [row]
+        });
+      }, 1000);
     }
   }
 
@@ -291,6 +344,15 @@ client.on("interactionCreate", async (interaction) => {
       const quizId = interaction.customId.replace('answer_quiz_', '');
       const { quiz, creatorName, type, question } = quizSessionMap.get(quizId);
       const answer = interaction.fields.getTextInputValue('answer').trim();
+
+      // check if quiz is over
+      const endTime = activeQuizzes.get(quizId);
+      if (!endTime || Date.now() > endTime) {
+        return interaction.reply({
+          content: '⏳ Quiz has timed out. You cannot answer.',
+          flags: 'Ephemeral'
+        });
+      }
 
       const correct = answer.toLowerCase() === quiz.answer.toLowerCase()
 
