@@ -294,7 +294,8 @@ client.on("interactionCreate", async (interaction) => {
       let remaining = Math.max(0, Math.floor((session.endTime - Date.now()) / 1000));
 
       const endTime = session.endTime;
-      handleQuizTimeout(quizId, endTime, quizSessionMap);
+      // TODO: probably remove this, since it caused results to be sent twice
+      // handleQuizTimeout(quizId, endTime, quizSessionMap);
 
       const quizMessage = await interaction.reply({
         content: `**${quiz.quizText}**\n\n` +
