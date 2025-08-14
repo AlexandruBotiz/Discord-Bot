@@ -61,7 +61,8 @@ client.on("interactionCreate", async (interaction) => {
         .addOptions(
           { label: 'Historical', value: 'historical' },
           { label: 'Funny Stuff / Icebreakers', value: 'icebreaker' },
-          { label: 'Movie Quote Identification', value: 'movie_quote' }
+          { label: 'Movie Quote Identification', value: 'movie_quote' },
+          { label: 'Computer Trivia', value: 'computer_trivia' }
         );
 
       const row = new ActionRowBuilder().addComponents(quizTypeSelect);
