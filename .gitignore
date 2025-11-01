@@ -1,10 +1,14 @@
-# Ignore Windows junk
-Desktop.ini
-Thumbs.db
-
-# Ignore Python/Node/other temp files
-__pycache__/
+# node / npm
 node_modules/
-.env
 
-DS_Store
+# IDE
+.idea/
+.vscode/
+
+# exclude .env.example
+!.env.example
+.env
+.env.*
+
+# Misc
+.DS_Store
