@@ -1,11 +1,14 @@
 import dotenv from 'dotenv';
 import { Client, GatewayIntentBits, InteractionType, Partials } from 'discord.js';
-import { handleQuizCreationModal } from './actualHandlers/quizCreationModalHandler.js';
-import { handleSelectMenu } from './actualHandlers/selectMenuHandlerMINE.js';
 import { handleCommand } from './commands/brainbuzz.js';
-import { handleAnswerSubmit } from './actualHandlers/answerSubmitHandlerMINE.js';
-import { handleQuizStartButton } from './actualHandlers/startQuizHandlerMINE.js';
-import { handleAnswerButton } from './actualHandlers/answerButtonHandlerMINE.js';
+import { handleQuizConfigSubmitButton } from './handlers/buttons/quizConfigSubmitButtonHandler.js';
+import {
+  handleQuizDurationSelectMenu,
+  handleQuizTypeSelectMenu
+} from './handlers/select-menus/selectMenuHandlers.js';
+import { handleChannelSelectMenu } from './handlers/channel-select-menus/channelSelectMenuHandler.js';
+import { handleStartQuizButton } from './handlers/buttons/startQuizButtonHandler.js';
+import { handleQuizAnswerButton } from './handlers/buttons/quizAnswerButtonHandler.js';
 
 dotenv.config({ quiet: true });
 
@@ -21,7 +24,7 @@ export const client = new Client({
 });
 
 (async () => {
-  client.login(process.env.DISCORD_TOKEN)
+  client.login(process.env.DISCORD_TOKEN);
 })();
 
 // Log when the bot is ready
@@ -29,34 +32,33 @@ client.once('ready', () => {
   console.log(`BrainBuzz is up and running!`);
 });
 
-
-
-client.on("interactionCreate", async (interaction) => {
+client.on('interactionCreate', async (interaction) => {
   // Slash command handler
   if (interaction.isChatInputCommand()) {
-    await handleCommand(interaction);
+    return await handleCommand(interaction);
   }
 
-  // Select menu handler
+  // Handle select menu interactions
   if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'quiz_type_select_menu')
-      await handleSelectMenu(interaction);
+    if (interaction.customId.startsWith('select-quiz-type-'))
+      return await handleQuizTypeSelectMenu(interaction);
+    else if (interaction.customId.startsWith('select-quiz-duration-'))
+      return await handleQuizDurationSelectMenu(interaction);
   }
 
-  // Modal submission handler
-  if (interaction.type === InteractionType.ModalSubmit) {
-    if (interaction.customId.startsWith('quiz_creation_modal')) {
-      await handleQuizCreationModal(interaction);
-    } else if (interaction.customId.startsWith('answer_quiz_')) {
-      await handleAnswerSubmit(interaction)
-    }
+  // Handle channel select menu interactions
+  if (interaction.isChannelSelectMenu()) {
+    return await handleChannelSelectMenu(interaction);
   }
 
+  // Handle button interactions
   if (interaction.isButton()) {
-    if (interaction.customId.startsWith('start_quiz_')) {
-      await handleQuizStartButton(interaction);
-    } else if (interaction.customId.startsWith('answer_quiz_button')) {
-      await handleAnswerButton(interaction);
+    if (interaction.customId.startsWith('submit-quiz-config-'))
+      return await handleQuizConfigSubmitButton(interaction);
+    else if (interaction.customId.startsWith('start-quiz-button-')) {
+      return await handleStartQuizButton(interaction);
+    } else if (interaction.customId.startsWith('quiz_answer_button_')) {
+      return await handleQuizAnswerButton(interaction);
     }
   }
 });

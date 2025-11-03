@@ -6,10 +6,10 @@ dotenv.config({ quiet: true });
 const axiosClient = axios.create({
   baseURL: process.env.BACKEND_URL,
   headers: {
-    Authorization: `Bearer ${process.env.BACKEND_KEY}`,
+    Authorization: `Bearer ${process.env.BACKEND_KEY}`
   },
-  timeout: 15000, // 15 seconds timeout
-})
+  timeout: 15000 // 15 seconds timeout
+});
 
 class ServerClient {
   static async getQuiz(type, duration) {
@@ -36,7 +36,7 @@ class ServerClient {
 
   static async getResults(quizId) {
     const response = await axiosClient.post('/results', {
-      quizId: quizId,
+      quizId: quizId
     });
 
     return response.data;
@@ -52,17 +52,16 @@ class ServerClient {
     });
 
     // map quiz types to slack select menu options format
-    return response.data.quizTypes.map(quizType => {
+    return response.data.quizTypes.map((quizType) => {
       return {
         text: {
           type: 'plain_text',
-          text: quizType.value,
+          text: quizType.value
         },
-        value: quizType.key,
-      }
-    })
+        value: quizType.key
+      };
+    });
   }
 }
 
 export default ServerClient;
-
