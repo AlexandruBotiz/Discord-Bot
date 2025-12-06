@@ -17,7 +17,7 @@ import quizConfigurationMenu from '../ui/quizConfigurationMenu.js';
  * to choose a quiz type
  */
 export async function handleCommand(interaction) {
-  if (interaction.commandName === 'brainbuzz') {
+  if (interaction.commandName === 'brainbuzzdev') {
 
     /**
      * Generate a unique session ID for the quiz configuration session.
